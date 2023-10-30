@@ -1,14 +1,15 @@
-using Newtonsoft.Json;
-using Oxide.Core;
+﻿using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Linq;
-using System;
+
+using Newtonsoft.Json;
+using Oxide.Core;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Inventory Backup", "MON@H", "1.0.5")]
+    [Info("Inventory Backup", "MON@H", "1.0.6")]
     [Description("Allows to save and restore players inventories​")]
 
     public class InventoryBackup : RustPlugin
@@ -16,29 +17,7 @@ namespace Oxide.Plugins
         #region Variables
 
         private const string PermissionUse = "inventorybackup.use";
-
-        private BasePlayer _player;
-        private Hash<string, PlayerInventoryData> _playerInventories;
-        private PlayerInventoryData _inventoryData;
-        private string _prefix;
-        private string _lang;
-        private ulong _userID;
-
-        private readonly List<Regex> _regexTags = new List<Regex>
-        {
-            new Regex("<color=.+?>", RegexOptions.Compiled),
-            new Regex("<size=.+?>", RegexOptions.Compiled)
-        };
-
-        private readonly List<string> _tags = new List<string>
-        {
-            "</color>",
-            "</size>",
-            "<i>",
-            "</i>",
-            "<b>",
-            "</b>"
-        };
+        private static readonly Regex _regexStripTags = new Regex("<color=.+?>|</color>|<size=.+?>|</size>|<i>|</i>|<b>|</b>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
 
         #endregion Variables
 
@@ -251,7 +230,7 @@ namespace Oxide.Plugins
             };
         }
 
-        private void LoadData()
+        public void LoadData()
         {
             try
             {
@@ -296,9 +275,9 @@ namespace Oxide.Plugins
             }
         }
 
-        private void SaveData() => Interface.Oxide.DataFileSystem.WriteObject(Name, _storedData);
+        public void SaveData() => Interface.Oxide.DataFileSystem.WriteObject(Name, _storedData);
 
-        private void ClearData()
+        public void ClearData()
         {
             PrintWarning("Creating a new data file");
 
@@ -311,13 +290,13 @@ namespace Oxide.Plugins
 
         #region Localization
 
-        private string Lang(string key, string userIDString = null, params object[] args)
+        public string Lang(string key, string userIDString = null, params object[] args)
         {
             try
             {
-                _lang = string.Format(lang.GetMessage(key, this, userIDString), args);
+                string message = string.Format(lang.GetMessage(key, this, userIDString), args);
 
-                return string.IsNullOrEmpty(userIDString) ? StripRustTags(_lang) : _lang;
+                return string.IsNullOrEmpty(userIDString) ? StripRustTags(message) : message;
             }
             catch (Exception ex)
             {
@@ -386,16 +365,17 @@ namespace Oxide.Plugins
         {
             BasePlayer player = arg.Player();
 
-            if (player != null && !permission.UserHasPermission(player.UserIDString, PermissionUse))
+            if (player.IsValid() && !permission.UserHasPermission(player.UserIDString, PermissionUse))
             {
                 SendReply(arg, Lang(LangKeys.Error.NoPermission, player.UserIDString));
                 return;
             }
 
+            ulong userID;
             if (!arg.HasArgs()
             || arg.Args.Length < 3
-            || !ulong.TryParse(arg.Args[1], out _userID)
-            || !_userID.IsSteamId())
+            || !ulong.TryParse(arg.Args[1], out userID)
+            || !userID.IsSteamId())
             {
                 SendReply(arg, Lang(LangKeys.Error.Syntax, player.UserIDString));
                 return;
@@ -404,7 +384,7 @@ namespace Oxide.Plugins
             switch (arg.Args[0].ToLower())
             {
                 case "save":
-                    if (InventorySave(_userID, arg.Args[2]))
+                    if (InventorySave(userID, arg.Args[2]))
                     {
                         SendReply(arg, Lang(LangKeys.Info.Success, player.UserIDString));
                         return;
@@ -412,7 +392,7 @@ namespace Oxide.Plugins
                     SendReply(arg, Lang(LangKeys.Error.Failed, player.UserIDString));
                     return;
                 case "restore":
-                    if (InventoryRestore(_userID, arg.Args[2]))
+                    if (InventoryRestore(userID, arg.Args[2]))
                     {
                         SendReply(arg, Lang(LangKeys.Info.Success, player.UserIDString));
                         return;
@@ -420,7 +400,7 @@ namespace Oxide.Plugins
                     SendReply(arg, Lang(LangKeys.Error.Failed, player.UserIDString));
                     return;
                 case "remove":
-                    if (InventoryRemove(_userID, arg.Args[2]))
+                    if (InventoryRemove(userID, arg.Args[2]))
                     {
                         SendReply(arg, Lang(LangKeys.Info.Success, player.UserIDString));
                         return;
@@ -434,7 +414,7 @@ namespace Oxide.Plugins
 
         private void CmdInventoryBackup(BasePlayer player, string cmd, string[] args)
         {
-            if (player == null || !player.userID.IsSteamId())
+            if (!player.IsValid() || !player.userID.IsSteamId())
             {
                 return;
             }
@@ -445,7 +425,8 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (args == null || args.Length < 3 || !ulong.TryParse(args[1], out _userID) || !_userID.IsSteamId())
+            ulong userID;
+            if (args == null || args.Length < 3 || !ulong.TryParse(args[1], out userID) || !userID.IsSteamId())
             {
                 PlayerSendMessage(player, Lang(LangKeys.Error.Syntax, player.UserIDString, _configData.Commands[0]));
                 return;
@@ -454,7 +435,7 @@ namespace Oxide.Plugins
             switch (args[0].ToLower())
             {
                 case "save":
-                    if (InventorySave(_userID, args[2]))
+                    if (InventorySave(userID, args[2]))
                     {
                         PlayerSendMessage(player, Lang(LangKeys.Info.Success, player.UserIDString));
                         return;
@@ -462,7 +443,7 @@ namespace Oxide.Plugins
                     PlayerSendMessage(player, Lang(LangKeys.Error.Failed, player.UserIDString));
                     return;
                 case "restore":
-                    if (InventoryRestore(_userID, args[2]))
+                    if (InventoryRestore(userID, args[2]))
                     {
                         PlayerSendMessage(player, Lang(LangKeys.Info.Success, player.UserIDString));
                         return;
@@ -470,7 +451,7 @@ namespace Oxide.Plugins
                     PlayerSendMessage(player, Lang(LangKeys.Error.Failed, player.UserIDString));
                     return;
                 case "remove":
-                    if (InventoryRemove(_userID, args[2]))
+                    if (InventoryRemove(userID, args[2]))
                     {
                         PlayerSendMessage(player, Lang(LangKeys.Info.Success, player.UserIDString));
                         return;
@@ -484,7 +465,7 @@ namespace Oxide.Plugins
 
         #endregion Commands
 
-        #region Core Methods
+        #region API
 
         private bool InventorySave(ulong userID, string inventoryName)
         {
@@ -493,25 +474,25 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            _player = FindPlayer(userID);
+            BasePlayer player = FindPlayer(userID);
 
-            if (_player == null || _player.inventory.AllItems().Length < 1)
+            if (!player.IsValid() || player.inventory.AllItems().Length < 1)
             {
                 return false;
             }
 
-            _playerInventories = _storedData.Inventories[userID];
+            Hash<string, PlayerInventoryData> playerInventories = _storedData.Inventories[userID];
 
-            if (_playerInventories == null)
+            if (playerInventories == null)
             {
-                _playerInventories = new Hash<string, PlayerInventoryData>();
-                _storedData.Inventories[userID] = _playerInventories;
+                playerInventories = new Hash<string, PlayerInventoryData>();
+                _storedData.Inventories[userID] = playerInventories;
             }
 
-            _playerInventories[inventoryName] = new PlayerInventoryData() {
-                ItemsBelt = _player.inventory.containerBelt.itemList.Select(ItemData.FromItem).ToList(),
-                ItemsMain = _player.inventory.containerMain.itemList.Select(ItemData.FromItem).ToList(),
-                ItemsWear = _player.inventory.containerWear.itemList.Select(ItemData.FromItem).ToList()
+            playerInventories[inventoryName] = new PlayerInventoryData() {
+                ItemsBelt = player.inventory.containerBelt.itemList.Select(ItemData.FromItem).ToList(),
+                ItemsMain = player.inventory.containerMain.itemList.Select(ItemData.FromItem).ToList(),
+                ItemsWear = player.inventory.containerWear.itemList.Select(ItemData.FromItem).ToList()
             };
 
             SaveData();
@@ -526,55 +507,52 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            _player = FindPlayer(userID);
+            BasePlayer player = FindPlayer(userID);
 
-            if (_player == null)
+            if (!player.IsValid())
             {
                 return false;
             }
 
-            _player.inventory.Strip();
+            player.inventory.Strip();
 
-            _playerInventories = _storedData.Inventories[userID];
-            _inventoryData = _playerInventories[inventoryName];
+            Hash<string, PlayerInventoryData> playerInventories = _storedData.Inventories[userID];
+            PlayerInventoryData inventoryData = playerInventories[inventoryName];
 
-            foreach (ItemData inventoryItem in _inventoryData.ItemsBelt)
+            if (inventoryData == null)
             {
-                Item item = inventoryItem.ToItem();
-
-                if (item != null)
-                {
-                    item.MoveToContainer(_player.inventory.containerBelt, item.position);
-                }
+                Log($"inventory not found {userID} {inventoryName}");
+                return false;
             }
 
-            foreach (ItemData inventoryItem in _inventoryData.ItemsMain)
+            foreach (ItemData inventoryItem in inventoryData.ItemsBelt)
             {
                 Item item = inventoryItem.ToItem();
 
-                if (item != null)
-                {
-                    item.MoveToContainer(_player.inventory.containerMain, item.position);
-                }
+                item?.MoveToContainer(player.inventory.containerBelt, item.position);
             }
 
-            foreach (ItemData inventoryItem in _inventoryData.ItemsWear)
+            foreach (ItemData inventoryItem in inventoryData.ItemsMain)
             {
                 Item item = inventoryItem.ToItem();
 
-                if (item != null)
-                {
-                    item.MoveToContainer(_player.inventory.containerWear, item.position);
-                }
+                item?.MoveToContainer(player.inventory.containerMain, item.position);
+            }
+
+            foreach (ItemData inventoryItem in inventoryData.ItemsWear)
+            {
+                Item item = inventoryItem.ToItem();
+
+                item?.MoveToContainer(player.inventory.containerWear, item.position);
             }
 
             Log($"inventory restored {userID} {inventoryName}");
 
             if (remove)
             {
-                _playerInventories.Remove(inventoryName);
+                playerInventories.Remove(inventoryName);
                 
-                if (_playerInventories.Count == 0)
+                if (playerInventories.Count == 0)
                 {
                     _storedData.Inventories.Remove(userID);
                 }
@@ -593,13 +571,13 @@ namespace Oxide.Plugins
                 return false;
             }
 
-            _playerInventories = _storedData.Inventories[userID];
+            Hash<string, PlayerInventoryData> playerInventories = _storedData.Inventories[userID];
 
-            if (_playerInventories != null)
+            if (playerInventories != null)
             {
-                _playerInventories.Remove(inventoryName);
+                playerInventories.Remove(inventoryName);
                 
-                if (_playerInventories.Count == 0)
+                if (playerInventories.Count == 0)
                 {
                     _storedData.Inventories.Remove(userID);
                 }
@@ -611,16 +589,16 @@ namespace Oxide.Plugins
             return true;
         }
 
-        #endregion Core Methods
+        #endregion API
 
         #region Helpers
 
-        private void RegisterPermissions()
+        public void RegisterPermissions()
         {
             permission.RegisterPermission(PermissionUse, this);
         }
 
-        private void AddCommands()
+        public void AddCommands()
         {
             if (_configData.Commands.Count == 0)
             {
@@ -634,41 +612,31 @@ namespace Oxide.Plugins
             }
         }
 
-        private string StripRustTags(string text)
+        public string StripRustTags(string text)
         {
-            if (string.IsNullOrEmpty(text))
+            if (string.IsNullOrWhiteSpace(text))
             {
                 return string.Empty;
             }
 
-            foreach (string tag in _tags)
-            {
-                text = text.Replace(tag, string.Empty);
-            }
-
-            foreach (Regex regexTag in _regexTags)
-            {
-                text = regexTag.Replace(text, string.Empty);
-            }
-
-            return text;
+            return _regexStripTags.Replace(text, string.Empty);
         }
 
-        private BasePlayer FindPlayer(ulong userID)
+        public BasePlayer FindPlayer(ulong userID)
         {
-            _player = BasePlayer.FindByID(userID);
+            BasePlayer player = BasePlayer.FindByID(userID);
 
-            if (_player == null)
+            if (!player.IsValid())
             {
                 return FindPlayer(userID.ToString());
             }
 
-            return _player;
+            return player;
         }
 
-        private BasePlayer FindPlayer(string userIDString) => BasePlayer.FindAwakeOrSleeping(userIDString);
+        public BasePlayer FindPlayer(string userIDString) => BasePlayer.FindAwakeOrSleeping(userIDString);
 
-        private void Log(string text)
+        public void Log(string text)
         {
             if (_configData.LoggingEnabled)
             {
@@ -676,10 +644,10 @@ namespace Oxide.Plugins
             }
         }
 
-        private void PlayerSendMessage(BasePlayer player, string message)
+        public void PlayerSendMessage(BasePlayer player, string message)
         {
-            _prefix = Lang(LangKeys.Format.Prefix, player.UserIDString);
-            player.SendConsoleCommand("chat.add", 2, _configData.SteamIDIcon, string.IsNullOrEmpty(_prefix) ? message : _prefix + message);
+            string prefix = Lang(LangKeys.Format.Prefix, player.UserIDString);
+            player.SendConsoleCommand("chat.add", 2, _configData.SteamIDIcon, string.IsNullOrEmpty(prefix) ? message : prefix + message);
         }
 
         #endregion Helpers
