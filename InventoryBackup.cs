@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using System.Linq;
 
@@ -9,23 +10,23 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Inventory Backup", "MON@H", "1.0.6")]
+    [Info("Inventory Backup", "MON@H", "1.0.7")]
     [Description("Allows to save and restore players inventories​")]
 
     public class InventoryBackup : RustPlugin
     {
-        #region Variables
+        #region Class Fields
 
         private const string PermissionUse = "inventorybackup.use";
-        private static readonly Regex _regexStripTags = new Regex("<color=.+?>|</color>|<size=.+?>|</size>|<i>|</i>|<b>|</b>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+        private static readonly Regex _regexStripTags = new("<color=.+?>|</color>|<size=.+?>|</size>|<i>|</i>|<b>|</b>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
 
-        #endregion Variables
+        #endregion Class Fields
 
         #region Initialization
 
         private void Init()
         {
-            if (!_configData.ClearOnWipe)
+            if (!_pluginConfig.ClearOnWipe)
             {
                 Unsubscribe(nameof(OnNewSave));
             }
@@ -41,55 +42,42 @@ namespace Oxide.Plugins
 
         #region Configuration
 
-        private ConfigData _configData;
+        private PluginConfig _pluginConfig;
 
-        private class ConfigData
+        public class PluginConfig
         {
             [JsonProperty(PropertyName = "Storage duration (days)")]
+            [DefaultValue(-1d)]
             public double StorageDuration = -1d;
 
             [JsonProperty(PropertyName = "Clear inventories data on wipe")]
-            public bool ClearOnWipe = false;
+            public bool ClearOnWipe { get; set; }
 
             [JsonProperty(PropertyName = "Logging enabled")]
-            public bool LoggingEnabled = false;
+            public bool LoggingEnabled { get; set; }
 
             [JsonProperty(PropertyName = "Chat steamID icon")]
-            public ulong SteamIDIcon = 0;
+            public ulong SteamIDIcon { get; set; }
 
             [JsonProperty(PropertyName = "Commands list", ObjectCreationHandling = ObjectCreationHandling.Replace)]
-            public List<string> Commands = new List<string>()
-            {
-                "invbackup"
-            };
+            public string[] Commands { get; set; }
         }
+
+        protected override void LoadDefaultConfig() => PrintWarning("Loading Default Config");
 
         protected override void LoadConfig()
         {
             base.LoadConfig();
-            try
-            {
-                _configData = Config.ReadObject<ConfigData>();
-                if (_configData == null)
-                {
-                    throw new Exception();
-                }
-                SaveConfig();
-            }
-            catch (Exception exception)
-            {
-                PrintError($"Loading config file threw exception:\n{exception}");
-                LoadDefaultConfig();
-            }
+            Config.Settings.DefaultValueHandling = DefaultValueHandling.Populate;
+            _pluginConfig = AdditionalConfig(Config.ReadObject<PluginConfig>());
+            Config.WriteObject(_pluginConfig);
         }
 
-        protected override void LoadDefaultConfig()
+        public PluginConfig AdditionalConfig(PluginConfig config)
         {
-            PrintWarning("Creating a new configuration file");
-            _configData = new ConfigData();
+            config.Commands ??= new[] { "invbackup" };
+            return config;
         }
-
-        protected override void SaveConfig() => Config.WriteObject(_configData);
 
         #endregion Configuration
 
@@ -99,7 +87,7 @@ namespace Oxide.Plugins
 
         private class StoredData
         {
-            public readonly Hash<ulong, Hash<string, PlayerInventoryData>> Inventories = new Hash<ulong, Hash<string, PlayerInventoryData>>();
+            public readonly Hash<ulong, Hash<string, PlayerInventoryData>> Inventories = new();
         }
 
         public class PlayerInventoryData
@@ -128,7 +116,7 @@ namespace Oxide.Plugins
             public string Text;
             public ulong Skin;
 
-            public List<ItemData> Contents = new List<ItemData>();
+            public List<ItemData> Contents = new();
 
             public Item ToItem()
             {
@@ -161,7 +149,7 @@ namespace Oxide.Plugins
                     {
                         if (item.contents == null)
                         {
-                            item.contents = new ItemContainer();
+                            item.contents = new();
                             item.contents.ServerInitialize(null, Contents.Count);
                             item.contents.GiveUID();
                             item.contents.parent = item;
@@ -194,7 +182,7 @@ namespace Oxide.Plugins
 
                 if (DataInt > 0)
                 {
-                    item.instanceData = new ProtoBuf.Item.InstanceData() {
+                    item.instanceData = new() {
                         ShouldPool = false,
                         dataInt = DataInt
                     };
@@ -210,7 +198,7 @@ namespace Oxide.Plugins
                 return item;
             }
 
-            public static ItemData FromItem(Item item) => new ItemData() {
+            public static ItemData FromItem(Item item) => new() {
                 ID = item.info.itemid,
                 Position = item.position,
                 Ammo = item.GetHeldEntity()?.GetComponent<BaseProjectile>()?.primaryMagazine?.contents ?? 0,
@@ -242,15 +230,15 @@ namespace Oxide.Plugins
                 ClearData();
             }
 
-            if (_configData.StorageDuration > -1)
+            if (_pluginConfig.StorageDuration > -1)
             {
-                Dictionary<ulong, string> inventoriesToRemove = new Dictionary<ulong, string>();
+                Dictionary<ulong, string> inventoriesToRemove = new();
 
                 foreach (KeyValuePair<ulong, Hash<string, PlayerInventoryData>> inventories in _storedData.Inventories)
                 {
                     foreach (KeyValuePair<string, PlayerInventoryData> playerInventory in inventories.Value)
                     {
-                        if ((DateTime.Now - playerInventory.Value.SaveDate).TotalDays > _configData.StorageDuration)
+                        if ((DateTime.Now - playerInventory.Value.SaveDate).TotalDays > _pluginConfig.StorageDuration)
                         {
                             inventoriesToRemove.Add(inventories.Key, playerInventory.Key);
                         }
@@ -280,9 +268,7 @@ namespace Oxide.Plugins
         public void ClearData()
         {
             PrintWarning("Creating a new data file");
-
-            _storedData = new StoredData();
-
+            _storedData = new();
             SaveData();
         }
 
@@ -409,7 +395,7 @@ namespace Oxide.Plugins
                     return;
             }
 
-            SendReply(arg, Lang(LangKeys.Error.Syntax, player.UserIDString, _configData.Commands[0]));
+            SendReply(arg, Lang(LangKeys.Error.Syntax, player.UserIDString, _pluginConfig.Commands[0]));
         }
 
         private void CmdInventoryBackup(BasePlayer player, string cmd, string[] args)
@@ -428,7 +414,7 @@ namespace Oxide.Plugins
             ulong userID;
             if (args == null || args.Length < 3 || !ulong.TryParse(args[1], out userID) || !userID.IsSteamId())
             {
-                PlayerSendMessage(player, Lang(LangKeys.Error.Syntax, player.UserIDString, _configData.Commands[0]));
+                PlayerSendMessage(player, Lang(LangKeys.Error.Syntax, player.UserIDString, _pluginConfig.Commands[0]));
                 return;
             }
 
@@ -460,7 +446,7 @@ namespace Oxide.Plugins
                     return;
             }
 
-            PlayerSendMessage(player, Lang(LangKeys.Error.Syntax, player.UserIDString, _configData.Commands[0]));
+            PlayerSendMessage(player, Lang(LangKeys.Error.Syntax, player.UserIDString, _pluginConfig.Commands[0]));
         }
 
         #endregion Commands
@@ -476,7 +462,11 @@ namespace Oxide.Plugins
 
             BasePlayer player = FindPlayer(userID);
 
-            if (!player.IsValid() || player.inventory.AllItems().Length < 1)
+            List<Item> list = Facepunch.Pool.Get<List<Item>>();
+            player.inventory.GetAllItems(list);
+            int count = list.Count;
+            Facepunch.Pool.FreeUnmanaged(ref list);
+            if (!player.IsValid() || count < 1)
             {
                 return false;
             }
@@ -485,11 +475,11 @@ namespace Oxide.Plugins
 
             if (playerInventories == null)
             {
-                playerInventories = new Hash<string, PlayerInventoryData>();
+                playerInventories = new();
                 _storedData.Inventories[userID] = playerInventories;
             }
 
-            playerInventories[inventoryName] = new PlayerInventoryData() {
+            playerInventories[inventoryName] = new() {
                 ItemsBelt = player.inventory.containerBelt.itemList.Select(ItemData.FromItem).ToList(),
                 ItemsMain = player.inventory.containerMain.itemList.Select(ItemData.FromItem).ToList(),
                 ItemsWear = player.inventory.containerWear.itemList.Select(ItemData.FromItem).ToList()
@@ -600,13 +590,7 @@ namespace Oxide.Plugins
 
         public void AddCommands()
         {
-            if (_configData.Commands.Count == 0)
-            {
-                _configData.Commands = new List<string>() { "invbackup" };
-                SaveConfig();
-            }
-
-            foreach (string command in _configData.Commands)
+            foreach (string command in _pluginConfig.Commands)
             {
                 cmd.AddChatCommand(command, this, nameof(CmdInventoryBackup));
             }
@@ -638,17 +622,13 @@ namespace Oxide.Plugins
 
         public void Log(string text)
         {
-            if (_configData.LoggingEnabled)
+            if (_pluginConfig.LoggingEnabled)
             {
-                LogToFile("log", $"{DateTime.Now.ToString("HH:mm:ss")} {text}", this);
+                LogToFile("log", $"{DateTime.Now:HH:mm:ss} {text}", this);
             }
         }
 
-        public void PlayerSendMessage(BasePlayer player, string message)
-        {
-            string prefix = Lang(LangKeys.Format.Prefix, player.UserIDString);
-            player.SendConsoleCommand("chat.add", 2, _configData.SteamIDIcon, string.IsNullOrEmpty(prefix) ? message : prefix + message);
-        }
+        public void PlayerSendMessage(BasePlayer player, string message) => player.SendConsoleCommand("chat.add", 2, _pluginConfig.SteamIDIcon, $"{Lang(LangKeys.Format.Prefix, player.UserIDString)}{message}");
 
         #endregion Helpers
     }
